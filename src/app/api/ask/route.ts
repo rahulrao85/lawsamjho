@@ -1,10 +1,12 @@
 import { getServerEnv, type ServerEnv } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/api-guard";
+import { logAccess } from "@/lib/audit";
 import { contentLengthExceeded, jsonError } from "@/lib/http";
 import { screenQuestion, QUESTION_LIMITS } from "@/lib/injection";
 import { ModelCallError } from "@/lib/llm/structured";
 import { answerQuestion } from "@/lib/qa/answer";
 import { askRequestSchema } from "@/lib/qa/schema";
+import { clientKeyFromHeaders } from "@/lib/ratelimit";
 import type { Clause } from "@/lib/segment";
 
 /**
@@ -19,7 +21,25 @@ import type { Clause } from "@/lib/segment";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
+  const startedAt = Date.now();
+  const clientKey = clientKeyFromHeaders(request.headers);
+  const meta: { question?: string } = {};
+
+  const response = await handleAsk(request, meta);
+
+  void logAccess({
+    route: "/api/ask",
+    clientKey,
+    status: response.status,
+    latencyMs: Date.now() - startedAt,
+    question: meta.question,
+  });
+
+  return response;
+}
+
+async function handleAsk(request: Request, meta: { question?: string }) {
   let env: ServerEnv;
   try {
     env = getServerEnv();
@@ -61,6 +81,7 @@ export async function POST(request: Request) {
     );
   }
 
+  meta.question = parsed.data.question;
   const screen = screenQuestion(parsed.data.question);
 
   if (screen.blocked) {

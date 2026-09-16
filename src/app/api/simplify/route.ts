@@ -1,7 +1,9 @@
 import { getServerEnv } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/api-guard";
+import { logAccess, saveUpload } from "@/lib/audit";
 import { contentLengthExceeded, jsonError } from "@/lib/http";
 import { extractFromBytes } from "@/lib/pdf/extract";
+import { clientKeyFromHeaders } from "@/lib/ratelimit";
 import { segmentClauses } from "@/lib/segment";
 import { generateSummary, SummaryGenerationError } from "@/lib/summary/generate";
 import { validateUpload, MAX_UPLOAD_LABEL } from "@/lib/upload";
@@ -89,7 +91,25 @@ async function collectUpload(request: Request): Promise<Collected | Response> {
   };
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
+  const startedAt = Date.now();
+  const clientKey = clientKeyFromHeaders(request.headers);
+  const meta: { filename?: string } = {};
+
+  const response = await handleSimplify(request, meta);
+
+  void logAccess({
+    route: "/api/simplify",
+    clientKey,
+    status: response.status,
+    latencyMs: Date.now() - startedAt,
+    filename: meta.filename,
+  });
+
+  return response;
+}
+
+async function handleSimplify(request: Request, meta: { filename?: string }) {
   let env;
   try {
     env = getServerEnv();
@@ -132,6 +152,14 @@ export async function POST(request: Request) {
   if (!validation.ok) {
     return jsonError(validation.status, "invalid_upload", validation.message);
   }
+
+  meta.filename = collected.filename;
+  // A defensive copy: unpdf's extractText (pdf.js underneath) detaches the
+  // buffer backing a Uint8Array it is given, to avoid holding two copies in
+  // memory. Since this save races that extraction rather than waiting on it,
+  // sharing the same buffer produced a real bug -- an empty file on disk, not
+  // an error anywhere, because the write only failed silently after the fact.
+  void saveUpload(collected.bytes.slice(), collected.filename);
 
   const extracted = await extractFromBytes(collected.bytes, validation.kind);
 

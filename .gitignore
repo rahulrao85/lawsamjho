@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local usage log + uploaded document retention (src/lib/audit.ts) --
+# operator-only, lives on the deployment host, never committed
+/data
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -7,7 +7,7 @@ import type { SimplifySummary } from "@/lib/summary/schema";
 export type SimplifySuccessResponse = {
   document: {
     filename: string;
-    sourceKind: "pdf" | "text";
+    sourceKind: "pdf" | "pdf-vision" | "text";
     pageCount: number | null;
     charCount: number;
     clauseCount: number;

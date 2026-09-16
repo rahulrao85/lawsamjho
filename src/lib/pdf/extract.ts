@@ -1,17 +1,20 @@
 import { extractText } from "unpdf";
 import { hasPdfSignature } from "@/lib/upload";
+import { transcribeViaVision } from "@/lib/pdf/vision";
 
 /**
  * Text extraction.
  *
- * PDF only, and only the text layer -- no OCR, no images. A scanned document
- * therefore comes back with little or no text, and the caller must say so
- * plainly rather than letting the model summarise nothing.
+ * The text layer is tried first -- it is exact, free, and instant. When a PDF
+ * has little or no text layer (a scan, a phone photo of a signed page), the
+ * raw bytes go to Gemini's vision endpoint for transcription instead of
+ * refusing outright. The two paths are labelled differently in `sourceKind` so
+ * the UI can tell the reader which one produced the text it is looking at.
  */
 
 export type ExtractedDocument = {
   text: string;
-  sourceKind: "pdf" | "text";
+  sourceKind: "pdf" | "pdf-vision" | "text";
   pageCount: number | null;
   warnings: string[];
 };
@@ -54,35 +57,60 @@ export async function extractFromBytes(
 
   let pageCount: number | null = null;
   let text = "";
+  // unpdf itself refusing to parse the file is a *reason* to try vision, not a
+  // reason to give up -- a pdf.js structural error and "this is actually a
+  // scanned image, not a text PDF" often look identical from the outside, and
+  // some scanners/phone "print to PDF" flows produce files pdf.js rejects
+  // outright even though the page image inside is perfectly readable.
+  let unreadableTextLayer = false;
 
   try {
+    // A copy, not `bytes` itself: unpdf's extractText (pdf.js underneath)
+    // detaches the buffer it is given. `bytes` is needed again below for the
+    // vision fallback, so unpdf gets its own copy to detach instead of the
+    // original -- the same bug and the same fix as the upload-retention save
+    // in the simplify route.
+    //
     // `mergePages: true` is typed as returning a single string, but unpdf has
     // historically returned an array here; accept both rather than shipping a
     // crash on a minor version bump.
-    const extracted = (await extractText(bytes, { mergePages: true })) as {
+    const extracted = (await extractText(bytes.slice(), { mergePages: true })) as {
       totalPages: number;
       text: string | string[];
     };
     pageCount = extracted.totalPages;
     text = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
   } catch {
+    unreadableTextLayer = true;
+  }
+
+  if (!unreadableTextLayer && text.trim().length >= MIN_USEFUL_TEXT) {
+    return { text, sourceKind: "pdf", pageCount, warnings: [] };
+  }
+
+  // No usable text layer, one way or another -- most likely a scan or a photo,
+  // possibly an encrypted or malformed file. Try vision before refusing.
+  const transcription = await transcribeViaVision(bytes);
+
+  if (transcription) {
     return {
-      text: "",
-      sourceKind: "pdf",
-      pageCount: null,
+      text: transcription.text,
+      sourceKind: "pdf-vision",
+      pageCount,
       warnings: [
-        "This PDF could not be read. If it is password-protected or corrupt, try a different copy.",
+        `This looked like a scan or a photograph, so its text was read by ${transcription.model}'s vision rather than a text layer. Check names, amounts and dates against the original document before relying on them.`,
       ],
     };
   }
 
-  const warnings: string[] = [];
-
-  if (text.trim().length < MIN_USEFUL_TEXT) {
-    warnings.push(
-      "Almost no text could be read from this PDF. It is most likely a scan or a photograph of a document, and this tool cannot read those yet — there is nothing here for the summary to be based on.",
-    );
-  }
-
-  return { text, sourceKind: "pdf", pageCount, warnings };
+  return {
+    text: "",
+    sourceKind: "pdf",
+    pageCount,
+    warnings: [
+      unreadableTextLayer
+        ? "This PDF could not be read, and it could not be transcribed either. If it is password-protected, remove the password and try again."
+        : "Almost no text could be read from this PDF, and it could not be transcribed either. It is most likely a scan or a photograph of a document that is too unclear to read, or the model was unavailable.",
+    ],
+  };
 }

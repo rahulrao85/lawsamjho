@@ -71,6 +71,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             LawSamjho explains documents. It is <strong>not</strong> legal advice and            does not replace a qualified lawyer. Every generated claim is linked to
             the clause it came from — check it there before acting on it.
           </p>
+          <p>
+            During this hackathon evaluation period, uploaded documents and usage may be
+            retained on the server for development purposes.
+          </p>
         </footer>
       </body>
     </html>
