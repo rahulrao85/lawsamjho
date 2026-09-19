@@ -1,0 +1,13 @@
+# Every text file checks out as LF regardless of the cloning machine's
+# core.autocrlf. Without this, a fresh clone on a Windows machine with the
+# (default) core.autocrlf=true checks samples/rent-agreement.txt out as CRLF,
+# while the LF copy embedded in samples/rent-agreement.ts (generated from it
+# at commit time) stays LF -- and rent-agreement.test.ts's identity check
+# fails. Real, reproduced: `git init` in an existing directory never runs a
+# checkout, so files written directly to disk (as this repo's were) never see
+# autocrlf's conversion; only a subsequent clone does.
+* text=auto eol=lf
+
+*.pdf binary
+*.png binary
+*.ico binary

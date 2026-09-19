@@ -9,14 +9,20 @@
 
 /* ---------------------------- Contrast override --------------------------
    --text-muted measures below WCAG AA's 4.5:1 for normal text in the
-   canonical tokens: 3.12:1 in Aurora, 4.02:1 in Voltage on --bg-primary. Real
-   failure, not theoretical -- this token colors the footer's legal
-   disclaimer and every clause-ID citation chip, not decoration. Overridden
-   here rather than edited in govu-tokens.css, which is meant to stay an
-   unmodified copy of the canonical file shared across projects; both new
-   values measure ≥4.6:1. */
-:root { --text-muted: #6b7280; }
-:root[data-theme="dark"] { --text-muted: #7a7a74; }
+   canonical tokens: 3.12:1 in Aurora, 4.02:1 in Voltage, both measured on
+   --bg-primary. Real failure, not theoretical -- this token colors the
+   footer's legal disclaimer, .clause-id, the low-severity badge, the anchor
+   date label, and the ask-question placeholder.
+   The first fix measured only against --bg-primary and was still wrong:
+   .clause sits on --bg-inset, the low-severity badge sits on --bg-inset, and
+   dark mode's worst surface is --bg-secondary, not --bg-primary. These values
+   clear 4.5:1 against the worst surface actually used in each theme (Aurora:
+   --bg-inset #f3f4f1 at 4.67:1; Voltage: --bg-secondary #121215 at 4.83:1),
+   not merely the page background.
+   Overridden here rather than edited in govu-tokens.css, which is meant to
+   stay an unmodified copy of the canonical file shared across projects. */
+:root { --text-muted: #656e7c; }
+:root[data-theme="dark"] { --text-muted: #82827a; }
 
 /* ------------------------------ Accessibility ----------------------------- */
 .skip-link {

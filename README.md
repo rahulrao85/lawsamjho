@@ -190,21 +190,26 @@ drifting apart. Comments explain *why*, not *what* — see `lib/deadlines.ts` or
 close.
 
 **Security** — Every upload is checked by magic bytes (`lib/upload.ts`), not
-filename or declared MIME type. Rate limiting on both model-calling endpoints,
-enforced before the body is even read (`lib/api-guard.ts`, `lib/ratelimit.ts`).
-Two-layer prompt-injection defence on Q&A (`lib/injection.ts`): a normalised
-pattern screen plus explicit delimited data blocks in the prompt itself. No
-secret reaches the client (`GET /api/health` reports model IDs and latency
-only) or the repo — `.env.local` is gitignored, verified against the full git
-history, not just the current diff.
+filename or declared MIME type. Rate limiting on all three model-calling
+endpoints, enforced before the body is even read (`lib/api-guard.ts`,
+`lib/ratelimit.ts`) — `GET /api/health` was missed in an earlier pass despite
+being auto-fired on every homepage load with no limit and no cache, found
+during review and fixed alongside a short-lived cache for the common case
+(§Efficiency). Two-layer prompt-injection defence on Q&A (`lib/injection.ts`):
+a normalised pattern screen plus explicit delimited data blocks in the prompt
+itself. No secret reaches the client (`GET /api/health` reports model IDs and
+latency only) or the repo — `.env.local` is gitignored, verified against the
+full git history, not just the current diff.
 
 **Efficiency** — One model call per document, not per feature: a single
 structured generation covers the summary, key terms, risks, obligations and
 key dates together. A content-hash result cache (`lib/cache.ts`) means an
 identical document re-analysed costs nothing — confirmed live at ~30s on a
-miss versus ~0.3s on a hit. Deterministic work (segmentation, citation/quote
-verification, date arithmetic) runs as plain synchronous code, never a model
-call.
+miss versus ~0.3s on a hit. `GET /api/health` also caches its result for 30s
+(`healthCache` in the route), so repeat homepage loads don't each spend a real
+model call the way they did before. Deterministic work (segmentation,
+citation/quote verification, date arithmetic) runs as plain synchronous code,
+never a model call.
 
 **Testing** — 295 tests across 16 files, `npm run verify` green in CI on every
 push. Coverage is concentrated deliberately on the deterministic core —
@@ -218,13 +223,17 @@ and a buffer-detach race that silently produced 0-byte saved files.
 (`layout.tsx`, `.skip-link`). An `aria-live` announcement on the one state
 transition that previously had none: analysis completing
 (`SimplifyWorkbench.tsx`) — the working and error states already had
-`role="status"`/`role="alert"`. Contrast checked, not assumed: `--text-muted`
-measured 3.12:1 (light) / 4.02:1 (dark) against WCAG AA's 4.5:1 floor for
-normal text — real failures, since the token colours the footer disclaimer and
-every clause-ID citation chip. Fixed with an app-level override
-(`globals.css`) measuring ≥4.6:1 in both themes, rather than editing the
-shared design-system file it would otherwise silently diverge from. Every
-interactive element is a real `<button>`/`<a>`/`<input>`, not a `<div
+`role="status"`/`role="alert"`. Contrast checked against the surfaces actually
+used, not just the page background: `--text-muted` (the footer disclaimer,
+`.clause-id`, the low-severity badge, the anchor-date label — not
+`.clause-chip`, which uses `--primary-color`) measured 3.12:1 (light) / 4.02:1
+(dark) on `--bg-primary`, below WCAG AA's 4.5:1 floor for normal text. A first
+fix measured only against that one background and missed that `.clause` and
+the low-severity badge sit on `--bg-inset`, and that Voltage's worst surface
+is `--bg-secondary`, not `--bg-primary` — both real failures on the elements
+that actually render there. Corrected to clear the worst surface in each
+theme (`globals.css`): 4.67:1 on Aurora's `--bg-inset`, 4.83:1 on Voltage's
+`--bg-secondary`. Every interactive element is a real `<button>`/`<a>`/`<input>`, not a `<div
 onClick>`.
 
 **Problem Statement Alignment** — Covers the brief's core use cases:

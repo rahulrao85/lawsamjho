@@ -80,3 +80,16 @@ Append one entry per phase (or whenever blocked). Newest entry at the bottom. Ke
 - **Not deployed or redeployed**, as instructed. Nothing is left running; `.next` is clean and the build is green.
 - **Ready to deploy:** yes.
 
+---
+
+## [19-Sep-2026] Coordinator note — independent review found and fixed 4 real bugs
+
+After scoring 96.5/100 on the first submission and shipping a v2 pass (CI, caching, accessibility), a second LLM was given full context and asked to independently verify the repo rather than take the README's claims on faith. It cloned fresh, ran the suite itself, and found four real, reproducible issues — all confirmed independently before fixing, not taken on trust:
+
+1. **The Phase 4 line above is false, and always has been.** Rate limiting only ever covered `/api/simplify` and `/api/ask`. `GET /api/health` calls the model too, is auto-fired on every homepage load by `SystemStatus`, and had neither a limit nor a cache — a real quota/cost exposure, not just an inaccurate status line. Fixed: a 30s result cache plus the same shared limiter, in `src/app/api/health/route.ts`.
+2. **A test fails on a fresh clone**, though not in this working copy or in CI (Linux never sees it). `git init` in an existing directory never runs a checkout, so this repo's files kept the LF endings they were written with; a genuine `git clone` on a Windows machine with the (default) `core.autocrlf=true` checks `samples/rent-agreement.txt` out as CRLF, and `rent-agreement.test.ts`'s identity check against the LF copy embedded in `rent-agreement.ts` fails. Fixed with `.gitattributes` forcing LF on checkout regardless of the cloning machine.
+3. **The Docker build fails on a fresh clone.** `public/` exists locally but is empty, so it was never tracked by git (git cannot track an empty directory) — a real clone has no `public/` at all, and the Dockerfile's `COPY --from=builder /app/public ./public` fails against it. Nothing references a public asset, so the line is simply removed rather than the folder resurrected.
+4. **The Phase 2/4 README additions had two claims that didn't match the code**: the rate-limiting claim above, and "`--text-muted` colours every clause-ID citation chip" — `.clause-chip` actually uses `--primary-color`; the token that needed fixing was `.clause-id`, a different element. Also, the original contrast fix measured only against `--bg-primary`; `.clause` and the low-severity badge sit on `--bg-inset`, and Voltage's worst surface is `--bg-secondary` — both still failed AA on the surfaces the elements actually render on. Retightened to clear the real worst surface in each theme.
+
+All four fixed and re-verified (`npm run verify` green, live smoke test on the deployed instance). Nothing else the review flagged was acted on — the x-forwarded-for spoofing risk and the cache-as-content-oracle concern are real but low-severity and pre-existing/inherent to the design; contract comparison, bilingual support, multi-document handling and .docx support remain deliberately out of scope, per BUILD_BRIEF.md, since they don't move a maxed-out Problem Statement Alignment score.
+

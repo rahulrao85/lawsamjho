@@ -20,7 +20,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV HOSTNAME=0.0.0.0
-COPY --from=builder /app/public ./public
+# No public/ directory in this repo -- nothing references a public asset, and
+# public/ is empty, which means untracked: git cannot track an empty
+# directory, so a fresh clone (what any real build starts from) has no
+# public/ at all. Copying from it here failed on exactly that clone, even
+# though it built fine from this working copy's own leftover empty folder.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
