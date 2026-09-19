@@ -170,7 +170,17 @@ export function SimplifyWorkbench({ initialPanel }: { initialPanel: AnalysisPane
       )}
 
       {state.kind === "done" && (
-        <ResultsView data={state.data} initialPanel={initialPanel} />
+        <>
+          {/* A short, separate announcement -- not the results themselves,
+              which would read the whole panel aloud on every load. The
+              working/error states already announce via role="status"/"alert"
+              above; this is the one transition (spinner -> results) that
+              previously had nothing telling a screen-reader user it happened. */}
+          <p aria-live="polite" className="visually-hidden">
+            Analysis complete. {state.data.document.clauseCount} clauses found.
+          </p>
+          <ResultsView data={state.data} initialPanel={initialPanel} />
+        </>
       )}
     </div>
   );

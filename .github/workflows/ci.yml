@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Same command a contributor runs locally -- one source of truth for
+      # "does this pass," not a parallel CI-only definition of green.
+      - run: npm run verify
+        env:
+          # A real key is not needed to build or test: getServerEnv() is
+          # called lazily at request time (src/lib/env.ts), never at build
+          # or import time, and every model call in the test suite goes
+          # through an injected generator (see StructuredGenerator in
+          # src/lib/llm/structured.ts), never the real network.
+          GEMINI_API_KEY: ci-placeholder

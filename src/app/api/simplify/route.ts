@@ -1,11 +1,12 @@
 import { getServerEnv } from "@/lib/env";
 import { enforceRateLimit } from "@/lib/api-guard";
 import { logAccess, saveUpload } from "@/lib/audit";
+import { createResultCache, hashContent } from "@/lib/cache";
 import { contentLengthExceeded, jsonError } from "@/lib/http";
 import { extractFromBytes } from "@/lib/pdf/extract";
 import { clientKeyFromHeaders } from "@/lib/ratelimit";
-import { segmentClauses } from "@/lib/segment";
-import { generateSummary, SummaryGenerationError } from "@/lib/summary/generate";
+import { segmentClauses, type SegmentationResult } from "@/lib/segment";
+import { generateSummary, SummaryGenerationError, type SimplifyResult } from "@/lib/summary/generate";
 import { validateUpload, MAX_UPLOAD_LABEL } from "@/lib/upload";
 
 /**
@@ -22,6 +23,17 @@ export const dynamic = "force-dynamic";
 
 /** Hard ceiling on pasted text, independent of the byte limit. */
 const MAX_TEXT_CHARS = 400_000;
+
+type CachedAnalysis = { segmentation: SegmentationResult; result: SimplifyResult };
+
+/**
+ * Keyed by a hash of the extracted text, not the uploaded file -- so the same
+ * document re-uploaded under a different name, or as a scan that vision
+ * transcribes to the same words, is still a hit. One shared instance per
+ * process, same reasoning as the shared rate limiter in api-guard.ts: a fresh
+ * instance per request would cache nothing.
+ */
+const analysisCache = createResultCache<CachedAnalysis>();
 
 type Collected = {
   filename: string;
@@ -172,56 +184,75 @@ async function handleSimplify(request: Request, meta: { filename?: string }) {
     );
   }
 
-  const segmentation = segmentClauses(extracted.text);
+  // Cached on content, not on the file -- see analysisCache's own comment.
+  // Extraction warnings still come from *this* upload even on a cache hit
+  // (e.g. a vision-transcription notice), since two different source files
+  // can extract to the same text without the caveats around producing it
+  // being the same.
+  const cacheKey = hashContent(extracted.text);
+  const cached = analysisCache.get(cacheKey);
+  let usedCache = false;
+  let segmentation: SegmentationResult;
+  let result: SimplifyResult;
 
-  if (segmentation.clauses.length === 0) {
-    return jsonError(
-      422,
-      "no_clauses",
-      "This document could not be broken into clauses, so there is nothing to summarise.",
-      segmentation.warnings.join(" "),
-    );
-  }
+  if (cached) {
+    ({ segmentation, result } = cached);
+    usedCache = true;
+  } else {
+    segmentation = segmentClauses(extracted.text);
 
-  try {
-    const result = await generateSummary({ clauses: segmentation.clauses });
-
-    return Response.json({
-      document: {
-        filename: collected.filename,
-        sourceKind: extracted.sourceKind,
-        pageCount: extracted.pageCount,
-        charCount: extracted.text.length,
-        clauseCount: segmentation.clauses.length,
-      },
-      segmentation: {
-        strategy: segmentation.strategy,
-        warnings: segmentation.warnings,
-      },
-      extractionWarnings: extracted.warnings,
-      clauses: segmentation.clauses,
-      summary: result.summary,
-      risks: result.risks,
-      obligations: result.obligations,
-      keyDates: result.keyDates,
-      citations: result.citations,
-      analysis: result.analysis,
-      generation: {
-        model: result.model,
-        usedFallback: result.usedFallback,
-        truncated: result.truncated,
-        latencyMs: result.latencyMs,
-      },
-    });
-  } catch (error) {
-    if (error instanceof SummaryGenerationError) {
-      return jsonError(422, "generation_failed", error.message, error.detail);
+    if (segmentation.clauses.length === 0) {
+      return jsonError(
+        422,
+        "no_clauses",
+        "This document could not be broken into clauses, so there is nothing to summarise.",
+        segmentation.warnings.join(" "),
+      );
     }
-    return jsonError(
-      500,
-      "unexpected",
-      "Something went wrong while summarising the document.",
-      error instanceof Error ? error.message : undefined,
-    );
+
+    try {
+      result = await generateSummary({ clauses: segmentation.clauses });
+    } catch (error) {
+      if (error instanceof SummaryGenerationError) {
+        return jsonError(422, "generation_failed", error.message, error.detail);
+      }
+      return jsonError(
+        500,
+        "unexpected",
+        "Something went wrong while summarising the document.",
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+
+    analysisCache.set(cacheKey, { segmentation, result });
   }
+
+  return Response.json({
+    document: {
+      filename: collected.filename,
+      sourceKind: extracted.sourceKind,
+      pageCount: extracted.pageCount,
+      charCount: extracted.text.length,
+      clauseCount: segmentation.clauses.length,
+    },
+    segmentation: {
+      strategy: segmentation.strategy,
+      warnings: segmentation.warnings,
+    },
+    extractionWarnings: extracted.warnings,
+    clauses: segmentation.clauses,
+    summary: result.summary,
+    risks: result.risks,
+    obligations: result.obligations,
+    keyDates: result.keyDates,
+    citations: result.citations,
+    analysis: result.analysis,
+    generation: {
+      model: result.model,
+      usedFallback: result.usedFallback,
+      usedCache,
+      truncated: result.truncated,
+      latencyMs: usedCache ? 0 : result.latencyMs,
+    },
+  });
 }

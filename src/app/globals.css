@@ -2,10 +2,38 @@
    App styles for LawSamjho.
 
    The theme itself lives in src/styles/govu-tokens.css (verbatim copy of the
-   canonical Govu Design tokens — Aurora light / Voltage dark). Nothing here
-   redefines a base token or a ready-made class; this file only adds the
-   layout and components this app needs, built from those tokens.
+   canonical Govu Design tokens — Aurora light / Voltage dark). This file only
+   adds the layout and components this app needs, built from those tokens --
+   with one deliberate, documented exception directly below.
    ========================================================================== */
+
+/* ---------------------------- Contrast override --------------------------
+   --text-muted measures below WCAG AA's 4.5:1 for normal text in the
+   canonical tokens: 3.12:1 in Aurora, 4.02:1 in Voltage on --bg-primary. Real
+   failure, not theoretical -- this token colors the footer's legal
+   disclaimer and every clause-ID citation chip, not decoration. Overridden
+   here rather than edited in govu-tokens.css, which is meant to stay an
+   unmodified copy of the canonical file shared across projects; both new
+   values measure ≥4.6:1. */
+:root { --text-muted: #6b7280; }
+:root[data-theme="dark"] { --text-muted: #7a7a74; }
+
+/* ------------------------------ Accessibility ----------------------------- */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--space-4);
+  z-index: 100;
+  padding: var(--space-3) var(--space-5);
+  background: var(--primary-color);
+  color: var(--primary-contrast);
+  border-radius: var(--radius-sm);
+  font-weight: 650;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: var(--space-4);
+}
 
 /* ------------------------------- Chrome ---------------------------------- */
 .app-header {

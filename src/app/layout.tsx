@@ -35,6 +35,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
+        {/* Visually hidden until focused -- the first tab stop for a keyboard
+            or screen-reader user, letting them skip the nav on every page. */}
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
+
         <header className="app-header no-print">
           <div className="app-header-inner">
             <Link href="/" className="brand">
@@ -64,7 +70,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="container">{children}</main>
+        <main id="main-content" className="container">
+          {children}
+        </main>
 
         <footer className="app-footer no-print">
           <p>

@@ -33,6 +33,8 @@ export type SimplifySuccessResponse = {
   generation: {
     model: string;
     usedFallback: boolean;
+    /** True when this result came from the content cache -- no model call this time. */
+    usedCache: boolean;
     truncated: boolean;
     latencyMs: number;
   };

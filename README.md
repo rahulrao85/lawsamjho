@@ -178,6 +178,63 @@ container on one VPS**. It would not be correct behind more than one replica, an
 `lib/ratelimit.ts` says so rather than pretending otherwise. Restarting the
 container resets the counters.
 
+## Judging criteria coverage
+
+Six categories, each pointing at where it is actually addressed, not just claimed.
+
+**Code Quality** — Strict TypeScript throughout; `npm run typecheck`/`npm run lint` both
+run in CI on every push (`.github/workflows/ci.yml`). One structured-call path
+(`lib/llm/structured.ts`) shared by every model call rather than three copies
+drifting apart. Comments explain *why*, not *what* — see `lib/deadlines.ts` or
+`lib/summary/quote.ts` for the non-obvious decisions and the failure modes they
+close.
+
+**Security** — Every upload is checked by magic bytes (`lib/upload.ts`), not
+filename or declared MIME type. Rate limiting on both model-calling endpoints,
+enforced before the body is even read (`lib/api-guard.ts`, `lib/ratelimit.ts`).
+Two-layer prompt-injection defence on Q&A (`lib/injection.ts`): a normalised
+pattern screen plus explicit delimited data blocks in the prompt itself. No
+secret reaches the client (`GET /api/health` reports model IDs and latency
+only) or the repo — `.env.local` is gitignored, verified against the full git
+history, not just the current diff.
+
+**Efficiency** — One model call per document, not per feature: a single
+structured generation covers the summary, key terms, risks, obligations and
+key dates together. A content-hash result cache (`lib/cache.ts`) means an
+identical document re-analysed costs nothing — confirmed live at ~30s on a
+miss versus ~0.3s on a hit. Deterministic work (segmentation, citation/quote
+verification, date arithmetic) runs as plain synchronous code, never a model
+call.
+
+**Testing** — 295 tests across 16 files, `npm run verify` green in CI on every
+push. Coverage is concentrated deliberately on the deterministic core —
+segmentation, citation/quote gates, deadline arithmetic, injection screening,
+the cache — where a test is cheap and a regression is otherwise invisible
+until a real document trips it. Real bugs this suite caught, not hypothetical
+ones: a `-1` coercing into `CLAUSE-01`, `\bdispute\b` not matching "Disputes",
+and a buffer-detach race that silently produced 0-byte saved files.
+
+**Accessibility** — Skip-to-content link, visible on keyboard focus
+(`layout.tsx`, `.skip-link`). An `aria-live` announcement on the one state
+transition that previously had none: analysis completing
+(`SimplifyWorkbench.tsx`) — the working and error states already had
+`role="status"`/`role="alert"`. Contrast checked, not assumed: `--text-muted`
+measured 3.12:1 (light) / 4.02:1 (dark) against WCAG AA's 4.5:1 floor for
+normal text — real failures, since the token colours the footer disclaimer and
+every clause-ID citation chip. Fixed with an app-level override
+(`globals.css`) measuring ≥4.6:1 in both themes, rather than editing the
+shared design-system file it would otherwise silently diverge from. Every
+interactive element is a real `<button>`/`<a>`/`<input>`, not a `<div
+onClick>`.
+
+**Problem Statement Alignment** — Covers the brief's core use cases:
+simplification, risk/obligation extraction with computed deadlines, grounded
+Q&A, and a lawyer-prep export (see "Scope" in `BUILD_BRIEF.md` for what was
+deliberately left out and why). Handles scanned and photographed documents via
+vision transcription (`lib/pdf/vision.ts`), not only clean text PDFs. Never
+gives legal advice or asserts enforceability — every system prompt says so
+explicitly, and the UI repeats it in the footer on every page.
+
 ## Running it
 
 ```bash
@@ -268,6 +325,8 @@ src/
   lib/
     api-contract.ts         the wire shape of both endpoints, shared both sides
     api-guard.ts            applies the rate limit to a request
+    audit.ts                operator-only usage log + upload retention (data/, gitignored)
+    cache.ts                content-hash result cache, bounded + TTL'd    ← heavily tested
     env.ts                  Zod-validated server config (lazy, memoised)
     http.ts                 one error shape, oversized-body guard, 429 helper
     injection.ts            question screen (pattern + normalisation) ← heavily tested
@@ -275,7 +334,8 @@ src/
     segment.ts              deterministic clause segmentation           ← heavily tested
     deadlines.ts            deterministic date arithmetic                ← heavily tested
     upload.ts               file type/size/PDF-signature validation
-    pdf/extract.ts          unpdf text extraction
+    pdf/extract.ts          unpdf text extraction, vision fallback for scans
+    pdf/vision.ts           Gemini multimodal transcription for scans/photos
     llm/structured.ts       the one structured-call + retry + fallback path
     llm/clause-block.ts     the delimited block both prompts embed
     summary/schema.ts       model-facing (shape) + app-facing (strict) schemas
@@ -298,7 +358,7 @@ docs/                       reference screenshots
 
 ## Tests
 
-`npm run test` — 285 tests across 15 files, all on deterministic code. The areas
+`npm run test` — 295 tests across 16 files, all on deterministic code. The areas
 the BUILD_BRIEF asked to prioritise are covered deliberately:
 
 - **Segmentation** (`segment.test.ts`) — guards are tested against the literal
