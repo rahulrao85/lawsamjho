@@ -20,11 +20,40 @@ type State =
   | { kind: "loaded"; data: HealthResponse }
   | { kind: "error"; message: string };
 
+/**
+ * A 429 from the shared limiter is not a health body -- it is the common
+ * `{ error: {...} }` shape, with no `config` or `models`, and returning it as
+ * "loaded" would make the render below throw on `data.models`. The 503
+ * "unavailable"/"misconfigured" bodies *are* health bodies (they always carry
+ * config + models), so this checks the shape rather than `response.ok`.
+ */
+function isHealthResponse(value: unknown): value is HealthResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<HealthResponse>;
+  return (
+    typeof candidate.status === "string" &&
+    typeof candidate.config === "object" &&
+    candidate.config !== null &&
+    Array.isArray(candidate.models)
+  );
+}
+
 /** Module scope so the effect body itself never calls setState synchronously. */
 async function fetchHealth(): Promise<State> {
   try {
     const response = await fetch("/api/health", { cache: "no-store" });
-    const data = (await response.json()) as HealthResponse;
+    const data: unknown = await response.json();
+
+    if (!isHealthResponse(data)) {
+      return {
+        kind: "error",
+        message:
+          response.status === 429
+            ? "Runtime check was throttled. Try again shortly."
+            : "The runtime check returned an unexpected response.",
+      };
+    }
+
     return { kind: "loaded", data };
   } catch {
     return { kind: "error", message: "Could not reach /api/health" };

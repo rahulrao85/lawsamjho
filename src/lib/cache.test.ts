@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createResultCache, hashContent } from "@/lib/cache";
 
 describe("hashContent", () => {
@@ -35,16 +35,32 @@ describe("createResultCache", () => {
     expect(cache.size()).toBe(1);
   });
 
-  it("expires an entry once its TTL has passed", () => {
-    const cache = createResultCache<string>({ ttlMs: 10 });
-    cache.set("a", "value");
-    expect(cache.get("a")).toBe("value");
+  describe("TTL expiry", () => {
+    // Mocked Date.now(), not a real setTimeout: a real one made this test's
+    // pass/fail depend on the CI machine's actual scheduling under load,
+    // which is exactly the kind of timing-sensitive test that is fine nine
+    // times out of ten and flakes on the tenth for a reason that has nothing
+    // to do with the cache.
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
 
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        expect(cache.get("a")).toBeUndefined();
-        resolve();
-      }, 20);
+    it("expires an entry once its TTL has passed", () => {
+      const cache = createResultCache<string>({ ttlMs: 10 });
+      cache.set("a", "value");
+      expect(cache.get("a")).toBe("value");
+
+      vi.advanceTimersByTime(11);
+
+      expect(cache.get("a")).toBeUndefined();
+    });
+
+    it("does not expire an entry before its TTL has passed", () => {
+      const cache = createResultCache<string>({ ttlMs: 10 });
+      cache.set("a", "value");
+
+      vi.advanceTimersByTime(9);
+
+      expect(cache.get("a")).toBe("value");
     });
   });
 

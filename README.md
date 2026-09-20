@@ -199,19 +199,31 @@ during review and fixed alongside a short-lived cache for the common case
 a normalised pattern screen plus explicit delimited data blocks in the prompt
 itself. No secret reaches the client (`GET /api/health` reports model IDs and
 latency only) or the repo — `.env.local` is gitignored, verified against the
-full git history, not just the current diff.
+full git history, not just the current diff. Baseline response headers
+(`next.config.ts`) — CSP, `X-Frame-Options`, `X-Content-Type-Options`,
+`Referrer-Policy`, HSTS — confirmed missing on the live deployment with a
+direct `curl -I` before adding them, since the Caddy layer in front of this
+app sets them on the apex domain but never on this app's own subdomain. Set
+in the app's own config instead of in Caddy, so they hold regardless of what
+sits in front of it.
 
 **Efficiency** — One model call per document, not per feature: a single
 structured generation covers the summary, key terms, risks, obligations and
-key dates together. A content-hash result cache (`lib/cache.ts`) means an
-identical document re-analysed costs nothing — confirmed live at ~30s on a
-miss versus ~0.3s on a hit. `GET /api/health` also caches its result for 30s
-(`healthCache` in the route), so repeat homepage loads don't each spend a real
-model call the way they did before. Deterministic work (segmentation,
-citation/quote verification, date arithmetic) runs as plain synchronous code,
-never a model call.
+key dates together. A content-hash result cache (`lib/cache.ts`), keyed on the
+*extracted text*, means an identical previously-analysed document skips a new
+summary-model call while the one-hour in-process cache is warm — confirmed
+live at ~30s on a miss versus ~0.3s on a hit for a text-layer PDF. This does
+not extend to a scanned or photographed PDF's vision-transcription step:
+that runs on every upload, since it produces the text the cache key is built
+from, so it necessarily runs *before* a cache lookup is even possible — the
+cache still saves the second (summary) call on a repeat, just not the first.
+`GET /api/health` also caches its result for 30s (`healthCache` in the
+route), so repeat homepage loads don't each spend a real model call the way
+they did before. Deterministic work (segmentation, citation/quote
+verification, date arithmetic) runs as plain synchronous code, never a model
+call.
 
-**Testing** — 295 tests across 16 files, `npm run verify` green in CI on every
+**Testing** — 296 tests across 16 files, `npm run verify` green in CI on every
 push. Coverage is concentrated deliberately on the deterministic core —
 segmentation, citation/quote gates, deadline arithmetic, injection screening,
 the cache — where a test is cheap and a regression is otherwise invisible
@@ -233,8 +245,13 @@ the low-severity badge sit on `--bg-inset`, and that Voltage's worst surface
 is `--bg-secondary`, not `--bg-primary` — both real failures on the elements
 that actually render there. Corrected to clear the worst surface in each
 theme (`globals.css`): 4.67:1 on Aurora's `--bg-inset`, 4.83:1 on Voltage's
-`--bg-secondary`. Every interactive element is a real `<button>`/`<a>`/`<input>`, not a `<div
-onClick>`.
+`--bg-secondary`. The upload dropzone's real `<input type="file">` (visually
+hidden, not `aria-hidden`, so it stays in the tab order) had no accessible
+name — a screen-reader user tabbing to it directly, rather than through the
+styled button that triggers it via ref, hit a second, generically-announced
+"choose file" control. Given an `aria-label`
+(`SimplifyWorkbench.tsx`). Every interactive element is a real
+`<button>`/`<a>`/`<input>`, not a `<div onClick>`.
 
 **Problem Statement Alignment** — Covers the brief's core use cases:
 simplification, risk/obligation extraction with computed deadlines, grounded
@@ -367,7 +384,7 @@ docs/                       reference screenshots
 
 ## Tests
 
-`npm run test` — 295 tests across 16 files, all on deterministic code. The areas
+`npm run test` — 296 tests across 16 files, all on deterministic code. The areas
 the BUILD_BRIEF asked to prioritise are covered deliberately:
 
 - **Segmentation** (`segment.test.ts`) — guards are tested against the literal

@@ -81,8 +81,9 @@ export function SimplifyWorkbench({ initialPanel }: { initialPanel: AnalysisPane
       <section className="card upload-card" aria-labelledby="upload-heading">
         <h2 id="upload-heading">Upload a document</h2>
         <p className="muted">
-          PDF or plain text, up to {MAX_UPLOAD_LABEL}. Text-based PDFs only — a scanned
-          image of a contract cannot be read yet.
+          PDF or plain text, up to {MAX_UPLOAD_LABEL}. Scanned or photographed PDFs are
+          read with AI vision — check names, amounts and dates against the original
+          before relying on them.
         </p>
 
         <div
@@ -105,6 +106,12 @@ export function SimplifyWorkbench({ initialPanel }: { initialPanel: AnalysisPane
             id={inputId}
             type="file"
             className="visually-hidden"
+            // Visually hidden, not aria-hidden: a screen-reader user can still tab
+            // to this real <input type="file"> directly rather than only via the
+            // styled button below, which triggers it programmatically through the
+            // ref. Without this label it announced as a second, generically-named
+            // "choose file" control with no indication of what it was for.
+            aria-label="Choose a document to upload"
             accept=".pdf,.txt,.text,.md,.markdown,application/pdf,text/plain,text/markdown"
             disabled={working}
             onChange={(event) => {
