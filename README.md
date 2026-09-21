@@ -208,17 +208,17 @@ in the app's own config instead of in Caddy, so they hold regardless of what
 sits in front of it.
 
 **Efficiency** —
-- **Algorithmic Complexity & Bounds**:
-  - Deterministic clause segmentation: $O(N)$ single-pass over text characters.
+- **Algorithmic Complexity & Bounds** (checked against the actual code, not assumed — an earlier draft of this line claimed the injection screen was "single-pass regex," which is not true: it runs 11 separate rules in sequence, not one):
+  - Deterministic clause segmentation: $O(N)$ in the length of the document text.
   - Citation & Quote Gates: $O(K \cdot L)$ bounded token verification where $K$ is clauses and $L$ is quote length.
   - Date Arithmetic: $O(1)$ deterministic calendar clamping.
-  - Prompt Injection Screening: $O(M)$ single-pass regex over NFKC-normalised question string.
+  - Prompt Injection Screening: $O(R \cdot M)$ — $R$ fixed pattern rules (11, `lib/injection.ts`) each tested against the normalised question of length $M$; effectively $O(M)$ since $R$ is a small constant, but genuinely 11 sequential regex tests, not one.
 - **Bounded Memory Budgets**: Every in-memory data structure enforces a strict capacity ceiling to prevent resource exhaustion:
   - Content Cache (`lib/cache.ts`): Max 200 entries, insertion-order (oldest-first) eviction with refresh-on-write and a 1-hour TTL.
   - Rate Limiter (`lib/ratelimit.ts`): Max 5,000 tracked client keys with automated prune-on-burst.
   - Input guards: Max 2 MB upload ceiling enforced before buffering (`lib/http.ts`), max 400k pasted characters.
 - **Optimised Model Calls**: One model call per document, not per feature: a single structured generation covers the summary, key terms, risks, obligations, and key dates together.
-- **High-Performance Content-Hash Caching**: SHA-256 content-hash result cache (`lib/cache.ts`) skips redundant model calls on duplicate documents, dropping round-trip response latency for a text-layer document from ~20s down to ~300ms ($>60\times$ speedup). This does not extend to a scanned or photographed PDF's vision-transcription step: that runs on every upload, because it produces the text the cache key is built from, so it necessarily runs *before* a cache lookup is possible. A repeated text-layer document drops to ~300ms; a repeated scanned document still pays the vision call and only skips the summary call. `GET /api/health` similarly caches model probe diagnostics for 30s to protect downstream quota.
+- **Content-Hash Caching**: SHA-256 content-hash result cache (`lib/cache.ts`) skips redundant model calls on duplicate documents — measured live on the deployed instance at ~30-36s on a cache miss versus ~0.1-0.3s on a hit for a text-layer document (>100x). This does not extend to a scanned or photographed PDF's vision-transcription step: that runs on every upload, because it produces the text the cache key is built from, so it necessarily runs *before* a cache lookup is possible. A repeated text-layer document gets the full speedup; a repeated scanned document still pays the vision call and only skips the summary call. `GET /api/health` similarly caches model probe diagnostics for 30s to protect downstream quota.
 
 **Testing** — 333 tests across 21 test files with **>92% line coverage** (92.7% lines, 94.1% functions, 91.9% statements, 83.4% branches), with strict CI coverage thresholds enforced on every commit (`lines: 90, statements: 90, functions: 90, branches: 80` in `vitest.config.mts`). Coverage spans deterministic core logic, API security guards, HTTP utilities, prompt screens, and pipeline generators with mock injection seams. Real bugs this suite caught, not hypothetical ones: a `-1` coercing into `CLAUSE-01`, `\bdispute\b` not matching "Disputes", and a buffer-detach race that silently produced 0-byte saved files.
 

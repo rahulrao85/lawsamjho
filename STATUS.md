@@ -82,22 +82,41 @@ Append one entry per phase (or whenever blocked). Newest entry at the bottom. Ke
 
 ---
 
-## [19-Sep-2026] Release Hardening & Verification — done
+## [19-Sep-2026] Coordinator note — independent review found and fixed 4 real bugs
 
-- Added 30s TTL diagnostics cache and shared rate-limiting to `GET /api/health` endpoint.
-- Added cross-platform line-ending enforcement via `.gitattributes` to guarantee deterministic fixture extraction across Windows and Linux environments.
-- Optimized Docker build configuration.
-- Enhanced theme contrast across inset and secondary surfaces, fully compliant with WCAG AA.
-- All verification suites green.
+After scoring 96.5/100 on the first submission and shipping a v2 pass (CI, caching, accessibility), a second LLM was given full context and asked to independently verify the repo rather than take the README's claims on faith. It cloned fresh, ran the suite itself, and found four real, reproducible issues — all confirmed independently before fixing, not taken on trust:
+
+1. **The Phase 4 line above is false, and always has been.** Rate limiting only ever covered `/api/simplify` and `/api/ask`. `GET /api/health` calls the model too, is auto-fired on every homepage load by `SystemStatus`, and had neither a limit nor a cache — a real quota/cost exposure, not just an inaccurate status line. Fixed: a 30s result cache plus the same shared limiter, in `src/app/api/health/route.ts`.
+2. **A test fails on a fresh clone**, though not in this working copy or in CI (Linux never sees it). `git init` in an existing directory never runs a checkout, so this repo's files kept the LF endings they were written with; a genuine `git clone` on a Windows machine with the (default) `core.autocrlf=true` checks `samples/rent-agreement.txt` out as CRLF, and `rent-agreement.test.ts`'s identity check against the LF copy embedded in `rent-agreement.ts` fails. Fixed with `.gitattributes` forcing LF on checkout regardless of the cloning machine.
+3. **The Docker build fails on a fresh clone.** `public/` exists locally but is empty, so it was never tracked by git (git cannot track an empty directory) — a real clone has no `public/` at all, and the Dockerfile's `COPY --from=builder /app/public ./public` fails against it. Nothing references a public asset, so the line is simply removed rather than the folder resurrected.
+4. **The Phase 2/4 README additions had two claims that didn't match the code**: the rate-limiting claim above, and "`--text-muted` colours every clause-ID citation chip" — `.clause-chip` actually uses `--primary-color`; the token that needed fixing was `.clause-id`, a different element. Also, the original contrast fix measured only against `--bg-primary`; `.clause` and the low-severity badge sit on `--bg-inset`, and Voltage's worst surface is `--bg-secondary` — both still failed AA on the surfaces the elements actually render on. Retightened to clear the real worst surface in each theme.
+
+All four fixed and re-verified (`npm run verify` green, live smoke test on the deployed instance). Nothing else the review flagged was acted on — the x-forwarded-for spoofing risk and the cache-as-content-oracle concern are real but low-severity and pre-existing/inherent to the design; contract comparison, bilingual support, multi-document handling and .docx support remain deliberately out of scope, per BUILD_BRIEF.md, since they don't move a maxed-out Problem Statement Alignment score.
+
+*(Note: this entry was briefly overwritten by a later commit with a vague summary that also introduced an unqualified "fully compliant with WCAG AA" claim — never true, no such audit was ever done. Restored here verbatim; see the 21-Sep entry below for that correction and what else was found in the same pass.)*
 
 ---
 
-## [21-Sep-2026] Test Suite Expansion & CI Coverage Hardening — done
+## [19-Sep-2026] Coordinator note — second independent review, live copy/label/header fixes
+
+A second review round (different from the one above) found and fixed: a live UI text claiming scanned PDFs "cannot be read yet" despite vision transcription already working; a file upload input with no accessible label; missing CSP/X-Frame-Options/X-Content-Type-Options/Referrer-Policy/HSTS response headers (added via `next.config.ts`, confirmed present on the live site afterward); and a README efficiency claim that overclaimed the result cache's coverage for scanned PDFs. All verified live, CI green.
+
+---
+
+## [21-Sep-2026] Test Suite Expansion & CI Coverage Hardening — done, with one real bug found and fixed afterward
 
 - Expanded automated test coverage across API rate limiting (`api-guard.test.ts`), HTTP error handling contracts (`http.test.ts`), audit logging (`audit.test.ts`), theme storage (`theme-store.test.ts`), and structured pipeline generation (`summary/generate.test.ts`).
 - Test suite expanded to 333 unit tests across 21 test files.
 - Code coverage increased to >92% lines across all lib modules.
 - Enforced strict automated coverage thresholds in `vitest.config.mts` (lines: 90%, statements: 90%, functions: 90%, branches: 80%) integrated into `npm run verify` and CI.
-- All tests passing, full production build verified.
+
+**Found on audit, before this went anywhere near a submission:**
+
+1. **`audit.test.ts` was silently corrupting the real audit log.** It set `AUDIT_DATA_DIR` in `beforeEach`, but `audit.ts` read that variable once at module load and cached the result — so every test run wrote fake uploads (including a file literally named `.._.._etc_passwd`, from the path-traversal test) and fabricated log lines into the *actual* `data/` directory, not an isolated temp one. Confirmed empirically: ran the suite, diffed `data/` before and after, found the pollution. Proven fixed the same way afterward — ran it again, `data/` was untouched. Fixed at the root by making `audit.ts` read the directory lazily instead of caching it at import time (`dataDir()`/`uploadsDir()`/`logFile()` functions, plus an exported `resetAuditDirCache()` test seam), and rewrote the tests to assert files actually land in the temp directory rather than only "didn't throw." The local dev copy of `data/` that had already been polluted (29 fake files, 24 fake log lines, accumulated across multiple prior test runs) was cleaned up; the production copy on the VPS was checked and was never affected, since tests don't run there.
+2. **A false "fully compliant with WCAG AA" claim** had been introduced in this same commit's STATUS.md entry (see above) — removed; no such audit was performed.
+3. **The Efficiency README section's injection-screening claim said "single-pass regex."** Untrue: `lib/injection.ts` runs 11 separate rules in sequence against the same string. Corrected to describe it accurately ($O(R \cdot M)$, $R=11$ constant).
+4. **The cache latency numbers (~20s → ~300ms) didn't match previously-verified live measurements** (~30-36s → ~0.1-0.3s, recorded in an earlier entry). Corrected to the actual measured figures rather than a rounder-looking approximation.
+
+All four re-verified before this was considered safe for the final submission attempt.
 
 

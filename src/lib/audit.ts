@@ -17,13 +17,34 @@ import path from "node:path";
  * every write here is fire-and-forget and swallows its own errors.
  */
 
-const DATA_DIR = process.env.AUDIT_DATA_DIR?.trim() || "./data";
-const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
-const LOG_FILE = path.join(DATA_DIR, "access.log");
+/**
+ * Read lazily, not as a module-level constant: a top-level `const DATA_DIR =
+ * process.env.AUDIT_DATA_DIR ?? "./data"` reads the environment exactly once,
+ * at import time. A test that sets `process.env.AUDIT_DATA_DIR` in its own
+ * `beforeEach` -- after this module has already been imported once, which in
+ * a shared Vitest worker is the common case -- would then silently write to
+ * the real `./data` on disk instead of its intended temp directory. This bit
+ * a real test file that shipped without catching it: every run wrote fake
+ * uploads and log lines into the operator's actual audit log.
+ */
+function dataDir(): string {
+  return process.env.AUDIT_DATA_DIR?.trim() || "./data";
+}
+function uploadsDir(): string {
+  return path.join(dataDir(), "uploads");
+}
+function logFile(): string {
+  return path.join(dataDir(), "access.log");
+}
+
+/** Test seam: forces the next call to re-read AUDIT_DATA_DIR and re-create it. */
+export function resetAuditDirCache(): void {
+  ensured = null;
+}
 
 let ensured: Promise<void> | null = null;
 function ensureDirs(): Promise<void> {
-  if (!ensured) ensured = mkdir(UPLOADS_DIR, { recursive: true }).then(() => undefined);
+  if (!ensured) ensured = mkdir(uploadsDir(), { recursive: true }).then(() => undefined);
   return ensured;
 }
 
@@ -42,7 +63,7 @@ export async function logAccess(event: AccessEvent): Promise<void> {
   try {
     await ensureDirs();
     const line = JSON.stringify({ at: new Date().toISOString(), ...event });
-    await appendFile(LOG_FILE, `${line}\n`, "utf8");
+    await appendFile(logFile(), `${line}\n`, "utf8");
   } catch {
     // Never let logging be the reason a real request fails.
   }
@@ -64,7 +85,7 @@ export async function saveUpload(bytes: Uint8Array, filename: string): Promise<s
     await ensureDirs();
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const unique = `${stamp}-${Math.random().toString(36).slice(2, 8)}-${safeName(filename)}`;
-    await writeFile(path.join(UPLOADS_DIR, unique), bytes);
+    await writeFile(path.join(uploadsDir(), unique), bytes);
     return unique;
   } catch {
     return null;
