@@ -214,11 +214,11 @@ sits in front of it.
   - Date Arithmetic: $O(1)$ deterministic calendar clamping.
   - Prompt Injection Screening: $O(M)$ single-pass regex over NFKC-normalised question string.
 - **Bounded Memory Budgets**: Every in-memory data structure enforces a strict capacity ceiling to prevent resource exhaustion:
-  - Content Cache (`lib/cache.ts`): Max 200 entries, LRU eviction with 1-hour TTL.
+  - Content Cache (`lib/cache.ts`): Max 200 entries, insertion-order (oldest-first) eviction with refresh-on-write and a 1-hour TTL.
   - Rate Limiter (`lib/ratelimit.ts`): Max 5,000 tracked client keys with automated prune-on-burst.
   - Input guards: Max 2 MB upload ceiling enforced before buffering (`lib/http.ts`), max 400k pasted characters.
 - **Optimised Model Calls**: One model call per document, not per feature: a single structured generation covers the summary, key terms, risks, obligations, and key dates together.
-- **High-Performance Content-Hash Caching**: SHA-256 content-hash result cache (`lib/cache.ts`) skips redundant model calls on duplicate documents, dropping round-trip response latency from ~20s down to ~300ms ($>60\times$ speedup). `GET /api/health` similarly caches model probe diagnostics for 30s to protect downstream quota.
+- **High-Performance Content-Hash Caching**: SHA-256 content-hash result cache (`lib/cache.ts`) skips redundant model calls on duplicate documents, dropping round-trip response latency for a text-layer document from ~20s down to ~300ms ($>60\times$ speedup). This does not extend to a scanned or photographed PDF's vision-transcription step: that runs on every upload, because it produces the text the cache key is built from, so it necessarily runs *before* a cache lookup is possible. A repeated text-layer document drops to ~300ms; a repeated scanned document still pays the vision call and only skips the summary call. `GET /api/health` similarly caches model probe diagnostics for 30s to protect downstream quota.
 
 **Testing** — 333 tests across 21 test files with **>92% line coverage** (92.7% lines, 94.1% functions, 91.9% statements, 83.4% branches), with strict CI coverage thresholds enforced on every commit (`lines: 90, statements: 90, functions: 90, branches: 80` in `vitest.config.mts`). Coverage spans deterministic core logic, API security guards, HTTP utilities, prompt screens, and pipeline generators with mock injection seams. Real bugs this suite caught, not hypothetical ones: a `-1` coercing into `CLAUSE-01`, `\bdispute\b` not matching "Disputes", and a buffer-detach race that silently produced 0-byte saved files.
 
@@ -405,7 +405,9 @@ docs/                       reference screenshots
 - **Audit & Logging** (`audit.test.ts`) — upload sanitization and the silence
   guarantee ensuring logging never fails a user request.
 - **Theme Store** (`theme-store.test.ts`, `theme.test.ts`) — subscription lifecycle,
-  SSR snapshots, and DOM synchronization.
+  SSR snapshots, and the node/non-browser fallback paths (the DOM write and the
+  cross-tab `storage` listener are browser-only and are not exercised by the node
+  test environment).
 - **Pipeline & Summary Generation** (`summary/generate.test.ts`) — budget
   enforcement, ungrounded citation rejection, and mock generator injection.
 - **Brief questions & assembly** (`questions.test.ts`, `brief.test.ts`) — ranking,
